@@ -31,3 +31,4 @@ TAGS
 *.m~
 python/*.egg-info/
 /doc/_build/
+build

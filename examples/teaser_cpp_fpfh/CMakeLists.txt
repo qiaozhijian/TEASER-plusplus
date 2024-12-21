@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(teaser_cpp_fpfh)
 
-set (CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14)
 
 find_package(Eigen3 REQUIRED)
 find_package(teaserpp REQUIRED)
-find_package(PCL 1.9 REQUIRED COMPONENTS common features kdtree)
+find_package(PCL 1.9 REQUIRED COMPONENTS common features kdtree io visualization)
 find_package(OpenMP)
 
 # Change this line to include your own executable file

@@ -9,129 +9,171 @@
 #include <teaser/registration.h>
 #include <teaser/matcher.h>
 
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_cloud.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/common/transforms.h>
+#include <pcl/filters/voxel_grid.h>
+
 // Macro constants for generating noise and outliers
-#define NOISE_BOUND 0.001
-#define N_OUTLIERS 1700
-#define OUTLIER_TRANSLATION_LB 5
-#define OUTLIER_TRANSLATION_UB 10
+#define NOISE_BOUND 0.2
 
 inline double getAngularError(Eigen::Matrix3d R_exp, Eigen::Matrix3d R_est) {
-  return std::abs(std::acos(fmin(fmax(((R_exp.transpose() * R_est).trace() - 1) / 2, -1.0), 1.0)));
+    return std::abs(std::acos(fmin(fmax(((R_exp.transpose() * R_est).trace() - 1) / 2, -1.0), 1.0)));
 }
 
-void addNoiseAndOutliers(Eigen::Matrix<double, 3, Eigen::Dynamic>& tgt) {
-  // Add uniform noise
-  Eigen::Matrix<double, 3, Eigen::Dynamic> noise =
-      Eigen::Matrix<double, 3, Eigen::Dynamic>::Random(3, tgt.cols()) * NOISE_BOUND / 2;
-  tgt = tgt + noise;
+template<typename PointT>
+void visualizeCloud(typename pcl::PointCloud<PointT>::Ptr source, typename pcl::PointCloud<PointT>::Ptr target) {
+    pcl::visualization::PCLVisualizer viewer("");
+    viewer.setBackgroundColor(255, 255, 255);
 
-  // Add outliers
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<> dis2(0, tgt.cols() - 1); // pos of outliers
-  std::uniform_int_distribution<> dis3(OUTLIER_TRANSLATION_LB,
-                                       OUTLIER_TRANSLATION_UB); // random translation
-  std::vector<bool> expected_outlier_mask(tgt.cols(), false);
-  for (int i = 0; i < N_OUTLIERS; ++i) {
-    int c_outlier_idx = dis2(gen);
-    assert(c_outlier_idx < expected_outlier_mask.size());
-    expected_outlier_mask[c_outlier_idx] = true;
-    tgt.col(c_outlier_idx).array() += dis3(gen); // random translation
-  }
+    pcl::visualization::PointCloudColorHandlerCustom<PointT> sourceColor(source, 255, 180, 0);
+    viewer.addPointCloud<PointT>(source, sourceColor, "source");
+    pcl::visualization::PointCloudColorHandlerCustom<PointT> targetColor(target, 0, 166, 237);
+    viewer.addPointCloud<PointT>(target, targetColor, "target");
+    viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "source");
+    viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "target");
+
+    viewer.addCoordinateSystem(1.0);
+    viewer.initCameraParameters();
+    // set camera position at the center of the point source
+    viewer.setCameraPosition(source->points[source->size() / 2].x,
+                             source->points[source->size() / 2].y,
+                             source->points[source->size() / 2].z,
+                             0, 0, 1);
+    viewer.spin();
+    viewer.close();
+}
+
+template<typename T>
+void voxelize(
+        const boost::shared_ptr<pcl::PointCloud<T>> srcPtr, boost::shared_ptr<pcl::PointCloud<T>> dstPtr,
+        double voxelSize) {
+    static pcl::VoxelGrid<T> voxel_filter;
+    voxel_filter.setInputCloud(srcPtr);
+    voxel_filter.setLeafSize(voxelSize, voxelSize, voxelSize);
+    voxel_filter.filter(*dstPtr);
+}
+
+std::vector<std::pair<int, int>> generate_correspondences(
+        teaser::PointCloud &src_cloud_teaser,
+        teaser::PointCloud &tgt_cloud_teaser,
+        double normal_search_radius = 1.0,
+        double fpfh_search_radius = 2.5) {
+
+    // Compute FPFH
+    teaser::FPFHEstimation fpfh;
+    auto obj_descriptors = fpfh.computeFPFHFeatures(src_cloud_teaser, normal_search_radius, fpfh_search_radius);
+    auto scene_descriptors = fpfh.computeFPFHFeatures(tgt_cloud_teaser, normal_search_radius, fpfh_search_radius);
+
+    teaser::Matcher matcher;
+    auto correspondences = matcher.calculateCorrespondences(
+            src_cloud_teaser, tgt_cloud_teaser, *obj_descriptors, *scene_descriptors, true, true, false, 0.95);
+    return correspondences;
+}
+
+Eigen::Matrix4d solve_correspondences(
+        teaser::PointCloud &src_cloud_teaser,
+        teaser::PointCloud &tgt_cloud_teaser,
+        const std::vector<std::pair<int, int>> &correspondences,
+        double noise_bound = 0.4) {
+    // Run TEASER++ registration
+    // Prepare solver parameters
+    teaser::RobustRegistrationSolver::Params params;
+    params.noise_bound = noise_bound;
+    params.cbar2 = 1;
+    params.estimate_scaling = false;
+    params.rotation_max_iterations = 100;
+    params.rotation_gnc_factor = 1.4;
+    params.rotation_estimation_algorithm =
+            teaser::RobustRegistrationSolver::ROTATION_ESTIMATION_ALGORITHM::GNC_TLS;
+    params.rotation_cost_threshold = 0.005;
+
+    // Solve with TEASER++
+    teaser::RobustRegistrationSolver solver(params);
+    solver.solve(src_cloud_teaser, tgt_cloud_teaser, correspondences);
+
+    auto solution = solver.getSolution();
+    Eigen::Matrix4d estimated_transform = Eigen::Matrix4d::Identity();
+    estimated_transform.topLeftCorner(3, 3) = solution.rotation;
+    estimated_transform.block<3, 1>(0, 3) = solution.translation;
+    return estimated_transform;
+}
+
+Eigen::Matrix4d fpfh_teaser(const pcl::PointCloud<pcl::PointXYZ>::Ptr &src_cloud,
+                            const pcl::PointCloud<pcl::PointXYZ>::Ptr &tgt_cloud) {
+
+    // 降采样
+    pcl::PointCloud<pcl::PointXYZ>::Ptr src_ds(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tgt_ds(new pcl::PointCloud<pcl::PointXYZ>);
+    double voxel_size = 0.5;
+    voxelize(src_cloud, src_ds, voxel_size);
+    voxelize(tgt_cloud, tgt_ds, voxel_size);
+
+    // 转换为 TEASER++ 格式
+    teaser::PointCloud src_cloud_teaser, tgt_cloud_teaser;
+    for (size_t i = 0; i < src_ds->size(); ++i) {
+        const pcl::PointXYZ &p = src_ds->points[i];
+        src_cloud_teaser.push_back({p.x, p.y, p.z});
+    }
+    for (size_t i = 0; i < tgt_ds->size(); ++i) {
+        const pcl::PointXYZ &p = tgt_ds->points[i];
+        tgt_cloud_teaser.push_back({p.x, p.y, p.z});
+    }
+
+    // 生成 correspondences
+    auto correspondences = generate_correspondences(src_cloud_teaser, tgt_cloud_teaser, 1.0, 2.5);
+
+    // TEASER++
+    return solve_correspondences(src_cloud_teaser, tgt_cloud_teaser, correspondences, 0.4);
 }
 
 int main() {
-  // Load the .ply file
-  teaser::PLYReader reader;
-  teaser::PointCloud src_cloud;
-  auto status = reader.read("./example_data/bun_zipper_res3.ply", src_cloud);
-  int N = src_cloud.size();
+    // Load the .ply file
+    teaser::PLYReader reader;
 
-  // Convert the point cloud to Eigen
-  Eigen::Matrix<double, 3, Eigen::Dynamic> src(3, N);
-  for (size_t i = 0; i < N; ++i) {
-    src.col(i) << src_cloud[i].x, src_cloud[i].y, src_cloud[i].z;
-  }
+    pcl::PointCloud<pcl::PointXYZ>::Ptr src_cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::io::loadPCDFile("./example_data/outdoor/source.pcd", *src_cloud);
 
-  // Homogeneous coordinates
-  Eigen::Matrix<double, 4, Eigen::Dynamic> src_h;
-  src_h.resize(4, src.cols());
-  src_h.topRows(3) = src;
-  src_h.bottomRows(1) = Eigen::Matrix<double, 1, Eigen::Dynamic>::Ones(N);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tgt_cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::io::loadPCDFile("./example_data/outdoor/target.pcd", *tgt_cloud);
 
-  // Apply an arbitrary SE(3) transformation
-  Eigen::Matrix4d T;
-  // clang-format off
-  T << 9.96926560e-01,  6.68735757e-02, -4.06664421e-02, -1.15576939e-01,
-      -6.61289946e-02, 9.97617877e-01,  1.94008687e-02, -3.87705398e-02,
-      4.18675510e-02, -1.66517807e-02,  9.98977765e-01, 1.14874890e-01,
-      0,              0,                0,              1;
-  // clang-format on
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    Eigen::Matrix4d estimated_transform = fpfh_teaser(src_cloud, tgt_cloud);
+    Eigen::Matrix3d rotation = estimated_transform.block<3, 3>(0, 0);
+    Eigen::Vector3d translation = estimated_transform.block<3, 1>(0, 3);
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
-  // Apply transformation
-  Eigen::Matrix<double, 4, Eigen::Dynamic> tgt_h = T * src_h;
-  Eigen::Matrix<double, 3, Eigen::Dynamic> tgt = tgt_h.topRows(3);
+    // Compare results
+    Eigen::Matrix4d T;
+    T << 0.999998, -0.00206442, 0.000848199, 28.5538,
+            0.00206406, 0.999998, 0.000423864, 0.20279,
+            -0.000849072, -0.000422113, 1, 0.130061,
+            0, 0, 0, 1;
 
-  // Add some noise & outliers
-  addNoiseAndOutliers(tgt);
+    std::cout << "=====================================" << std::endl;
+    std::cout << "          TEASER++ Results           " << std::endl;
+    std::cout << "=====================================" << std::endl;
+    std::cout << "Expected rotation: " << std::endl;
+    std::cout << T.topLeftCorner(3, 3) << std::endl;
+    std::cout << "Estimated rotation: " << std::endl;
+    std::cout << rotation << std::endl;
+    std::cout << "Error (rad): " << getAngularError(T.topLeftCorner(3, 3), rotation)
+              << std::endl;
+    std::cout << std::endl;
+    std::cout << "Expected translation: " << std::endl;
+    std::cout << T.topRightCorner(3, 1) << std::endl;
+    std::cout << "Estimated translation: " << std::endl;
+    std::cout << translation << std::endl;
+    std::cout << "Error (m): " << (T.topRightCorner(3, 1) - translation).norm() << std::endl;
+    std::cout << std::endl;
+    std::cout << "Time taken (s): "
+              << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() /
+                 1000000.0
+              << std::endl;
 
-  // Convert to teaser point cloud
-  teaser::PointCloud tgt_cloud;
-  for (size_t i = 0; i < tgt.cols(); ++i) {
-    tgt_cloud.push_back({static_cast<float>(tgt(0, i)), static_cast<float>(tgt(1, i)),
-                         static_cast<float>(tgt(2, i))});
-  }
-
-  // Compute FPFH
-  teaser::FPFHEstimation fpfh;
-  auto obj_descriptors = fpfh.computeFPFHFeatures(src_cloud, 0.02, 0.04);
-  auto scene_descriptors = fpfh.computeFPFHFeatures(tgt_cloud, 0.02, 0.04);
-
-  teaser::Matcher matcher;
-  auto correspondences = matcher.calculateCorrespondences(
-      src_cloud, tgt_cloud, *obj_descriptors, *scene_descriptors, false, true, false, 0.95);
-
-  // Run TEASER++ registration
-  // Prepare solver parameters
-  teaser::RobustRegistrationSolver::Params params;
-  params.noise_bound = NOISE_BOUND;
-  params.cbar2 = 1;
-  params.estimate_scaling = false;
-  params.rotation_max_iterations = 100;
-  params.rotation_gnc_factor = 1.4;
-  params.rotation_estimation_algorithm =
-      teaser::RobustRegistrationSolver::ROTATION_ESTIMATION_ALGORITHM::GNC_TLS;
-  params.rotation_cost_threshold = 0.005;
-
-  // Solve with TEASER++
-  teaser::RobustRegistrationSolver solver(params);
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  solver.solve(src_cloud, tgt_cloud, correspondences);
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-
-  auto solution = solver.getSolution();
-
-  // Compare results
-  std::cout << "=====================================" << std::endl;
-  std::cout << "          TEASER++ Results           " << std::endl;
-  std::cout << "=====================================" << std::endl;
-  std::cout << "Expected rotation: " << std::endl;
-  std::cout << T.topLeftCorner(3, 3) << std::endl;
-  std::cout << "Estimated rotation: " << std::endl;
-  std::cout << solution.rotation << std::endl;
-  std::cout << "Error (rad): " << getAngularError(T.topLeftCorner(3, 3), solution.rotation)
-            << std::endl;
-  std::cout << std::endl;
-  std::cout << "Expected translation: " << std::endl;
-  std::cout << T.topRightCorner(3, 1) << std::endl;
-  std::cout << "Estimated translation: " << std::endl;
-  std::cout << solution.translation << std::endl;
-  std::cout << "Error (m): " << (T.topRightCorner(3, 1) - solution.translation).norm() << std::endl;
-  std::cout << std::endl;
-  std::cout << "Number of correspondences: " << N << std::endl;
-  std::cout << "Number of outliers: " << N_OUTLIERS << std::endl;
-  std::cout << "Time taken (s): "
-            << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() /
-                   1000000.0
-            << std::endl;
+    // Visualize results
+    pcl::PointCloud<pcl::PointXYZ>::Ptr src_transformed(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::transformPointCloud(*src_cloud, *src_transformed, estimated_transform);
+    visualizeCloud<pcl::PointXYZ>(src_transformed, tgt_cloud);
 }
