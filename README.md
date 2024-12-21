@@ -40,7 +40,9 @@ sudo make install
 sudo ldconfig
 cd .. && cd examples/teaser_cpp_fpfh && mkdir build && cd build
 cmake .. && make
+cd ../../
 ./teaser_cpp_fpfh
+./teaser_cpp_fpfh_ransac
 ```
 You should see terminal output like this:
 ```shell script
