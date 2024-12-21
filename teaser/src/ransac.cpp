@@ -39,11 +39,8 @@ solve_correspondences_by_ransac(teaser::PointCloud& src_cloud_teaser,
   std::mt19937 rng(std::random_device{}());
   std::uniform_int_distribution<int> dist(0, num_points - 1);
 
-  double enough_inliers = 0.5 * num_points;
 #pragma omp parallel for
   for (int iter = 0; iter < max_iterations; ++iter) {
-    if (best_inliers >= enough_inliers)
-      continue; // End early if enough inliers have been found
 
     int i = dist(rng), j = dist(rng), k = dist(rng);
     int src_i_idx = correspondences[i].first, src_j_idx = correspondences[j].first,

@@ -12,6 +12,6 @@ Eigen::Matrix4d
 solve_correspondences_by_ransac(teaser::PointCloud& src_cloud_teaser,
                                 teaser::PointCloud& tgt_cloud_teaser,
                                 const std::vector<std::pair<int, int>>& correspondences,
-                                int max_iterations = 1e6, double inlier_threshold = 0.5);
+                                int max_iterations = 1e8, double inlier_threshold = 0.5);
 }
 #endif // TEASERPP_RANSAC_H

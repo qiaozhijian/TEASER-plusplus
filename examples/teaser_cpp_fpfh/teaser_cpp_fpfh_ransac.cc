@@ -125,26 +125,26 @@ Eigen::Matrix4d fpfh_teaser(const pcl::PointCloud<pcl::PointXYZ>::Ptr &src_cloud
     // 生成 correspondences
     auto correspondences = generate_correspondences(src_cloud_teaser, tgt_cloud_teaser, 1.0, 2.5);
     // Compute the inlier ratio
-    double thd = 0.5;
-    int num_inliers = 0;
-    Eigen::Matrix4d gt_transform = Eigen::Matrix4d::Identity();
-    gt_transform.block<3, 3>(0, 0) << 0.999998, -0.00206442, 0.000848199,
-            0.00206406, 0.999998, 0.000423864,
-            -0.000849072, -0.000422113, 1;
-    gt_transform.block<3, 1>(0, 3) << 28.5538, 0.20279, 0.130061;
-    for (const auto &correspondence : correspondences) {
-        teaser::PointXYZ src_point = src_cloud_teaser[correspondence.first];
-        teaser::PointXYZ tgt_point = tgt_cloud_teaser[correspondence.second];
-        Eigen::Vector3d src(src_point.x, src_point.y, src_point.z);
-        Eigen::Vector3d tgt(tgt_point.x, tgt_point.y, tgt_point.z);
-        Eigen::Vector3d src_transformed = gt_transform.block<3, 3>(0, 0) * src + gt_transform.block<3, 1>(0, 3);
-        if ((src_transformed - tgt).norm() < thd) {
-            num_inliers++;
-        }
-    }
-    std::cout << "Inlier ratio: " << static_cast<double>(num_inliers) / correspondences.size() << std::endl;
-    std::cout << "Number of correspondences: " << correspondences.size() << std::endl;
-    std::cout << "Number of inliers: " << num_inliers << std::endl;
+    // double thd = 0.5;
+    // int num_inliers = 0;
+    // Eigen::Matrix4d gt_transform = Eigen::Matrix4d::Identity();
+    // gt_transform.block<3, 3>(0, 0) << 0.999998, -0.00206442, 0.000848199,
+    //         0.00206406, 0.999998, 0.000423864,
+    //         -0.000849072, -0.000422113, 1;
+    // gt_transform.block<3, 1>(0, 3) << 28.5538, 0.20279, 0.130061;
+    // for (const auto &correspondence : correspondences) {
+    //     teaser::PointXYZ src_point = src_cloud_teaser[correspondence.first];
+    //     teaser::PointXYZ tgt_point = tgt_cloud_teaser[correspondence.second];
+    //     Eigen::Vector3d src(src_point.x, src_point.y, src_point.z);
+    //     Eigen::Vector3d tgt(tgt_point.x, tgt_point.y, tgt_point.z);
+    //     Eigen::Vector3d src_transformed = gt_transform.block<3, 3>(0, 0) * src + gt_transform.block<3, 1>(0, 3);
+    //     if ((src_transformed - tgt).norm() < thd) {
+    //         num_inliers++;
+    //     }
+    // }
+    // std::cout << "Inlier ratio: " << static_cast<double>(num_inliers) / correspondences.size() << std::endl;
+    // std::cout << "Number of correspondences: " << correspondences.size() << std::endl;
+    // std::cout << "Number of inliers: " << num_inliers << std::endl;
 
     // TEASER++
     Eigen::Matrix4d estimated_transform = teaser::solve_correspondences_by_ransac(src_cloud_teaser, tgt_cloud_teaser,
