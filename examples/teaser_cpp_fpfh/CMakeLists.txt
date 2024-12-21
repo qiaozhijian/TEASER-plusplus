@@ -22,6 +22,13 @@ add_executable(teaser_cpp_fpfh teaser_cpp_fpfh.cc)
 target_link_libraries(teaser_cpp_fpfh Eigen3::Eigen teaserpp::teaser_registration teaserpp::teaser_features
         teaserpp::teaser_io ${PCL_LIBRARIES} OpenMP::OpenMP_CXX)
 
+# Change this line to include your own executable file
+add_executable(teaser_cpp_fpfh_ransac teaser_cpp_fpfh_ransac.cc)
+
+# Link to teaserpp & Eigen3
+target_link_libraries(teaser_cpp_fpfh_ransac Eigen3::Eigen teaserpp::teaser_registration teaserpp::teaser_features
+        teaserpp::teaser_io ${PCL_LIBRARIES} OpenMP::OpenMP_CXX)
+
 # Copy the data files to build directory
 file(COPY ../example_data/
         DESTINATION ./example_data/

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <vector>
+#include <cmath>
 
 namespace teaser {
 
@@ -21,15 +22,23 @@ struct PointXYZ {
     return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
   }
   friend inline bool operator!=(const PointXYZ& lhs, const PointXYZ& rhs) { return !(lhs == rhs); }
+
+  friend inline PointXYZ operator+(const PointXYZ& lhs, const PointXYZ& rhs) {
+    return PointXYZ{lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z};
+  }
+  friend inline PointXYZ operator-(const PointXYZ& lhs, const PointXYZ& rhs) {
+    return PointXYZ{lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z};
+  }
+  inline double norm() const { return std::sqrt(x * x + y * y + z * z); }
 };
 
 class PointCloud {
 public:
-  /**
-   * @brief Default constructor for PointCloud
-   */
-  PointCloud() = default;
-
+    /**
+     * @brief Default constructor for PointCloud
+     */
+    PointCloud() = default;
+    
   // c++ container named requirements
   using value_type = PointXYZ;
   using reference = PointXYZ&;

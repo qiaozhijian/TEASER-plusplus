@@ -22,6 +22,7 @@ add_library(teaser_registration SHARED
         src/certification.cc
         src/registration.cc
         src/graph.cc
+        src/ransac.cpp
         )
 target_link_libraries(teaser_registration
         PUBLIC Eigen3::Eigen

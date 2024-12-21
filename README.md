@@ -38,9 +38,9 @@ cd TEASER-plusplus && mkdir build && cd build
 cmake .. && make
 sudo make install
 sudo ldconfig
-cd .. && cd examples/teaser_cpp_ply && mkdir build && cd build
+cd .. && cd examples/teaser_cpp_fpfh && mkdir build && cd build
 cmake .. && make
-./teaser_cpp_ply
+./teaser_cpp_fpfh
 ```
 You should see terminal output like this:
 ```shell script
