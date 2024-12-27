@@ -67,8 +67,13 @@ std::vector<std::pair<int, int>> generate_correspondences(
     auto scene_descriptors = fpfh.computeFPFHFeatures(tgt_cloud_teaser, normal_search_radius, fpfh_search_radius);
 
     teaser::Matcher matcher;
-    auto correspondences = matcher.calculateCorrespondences(
-            src_cloud_teaser, tgt_cloud_teaser, *obj_descriptors, *scene_descriptors, true, true, false, 0.95);
+    // auto correspondences = matcher.calculateCorrespondences(
+    //         src_cloud_teaser, tgt_cloud_teaser, *obj_descriptors, *scene_descriptors, true, true, false, 0.95);
+    std::cout << "obj_descriptors size: " << obj_descriptors->size() << std::endl;
+    std::cout << "scene_descriptors size: " << scene_descriptors->size() << std::endl;
+    auto correspondences = matcher.calculateCorrespondencesByMKNN(
+            src_cloud_teaser, tgt_cloud_teaser, *obj_descriptors, *scene_descriptors, 5);
+    std::cout << "correspondences size: " << correspondences.size() << std::endl;
     return correspondences;
 }
 

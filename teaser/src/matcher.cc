@@ -9,6 +9,8 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <flann/flann.hpp>
+#include <boost/functional/hash.hpp>
+#include <unordered_set>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -17,6 +19,73 @@
 #include "teaser/geometry.h"
 
 namespace teaser {
+
+std::vector<std::pair<int, int>> Matcher::calculateCorrespondencesByMKNN(
+      const teaser::PointCloud& source_points, const teaser::PointCloud& target_points,
+      const teaser::FPFHCloud& source_features, const teaser::FPFHCloud& target_features,
+      int knn) {
+  
+  Feature src_features, tgt_features;
+  src_features.reserve(source_features.size());
+  tgt_features.reserve(target_features.size());
+
+  for (const auto& f : source_features) {
+    Eigen::VectorXf fpfh(33);
+    for (int i = 0; i < 33; i++)
+      fpfh(i) = f.histogram[i];
+    src_features.emplace_back(std::move(fpfh));
+  }
+  for (const auto& f : target_features) {
+    Eigen::VectorXf fpfh(33);
+    for (int i = 0; i < 33; i++)
+      fpfh(i) = f.histogram[i];
+    tgt_features.emplace_back(std::move(fpfh));
+  }
+
+  // Build FLANNTREE
+  KDTree feature_tree_src(flann::KDTreeSingleIndexParams(15));
+  buildKDTree(src_features, &feature_tree_src);
+
+  KDTree feature_tree_tgt(flann::KDTreeSingleIndexParams(15));
+  buildKDTree(tgt_features, &feature_tree_tgt);
+
+  // Search for the nearest K neighbors
+  std::vector<int> corres_K(knn);
+  std::vector<float> dis(knn);
+  std::vector<std::pair<int, int>> src_query_corres;
+  src_query_corres.reserve(source_points.size() * knn);
+
+  for (int i = 0; i < source_points.size(); i++) {
+    searchKDTree(&feature_tree_tgt, src_features[i], corres_K, dis, knn);
+    for (int j = 0; j < knn; j++) {
+      src_query_corres.emplace_back(i, corres_K[j]);
+    }
+  }
+
+  // Search for the nearest K neighbors
+  std::vector<std::pair<int, int>> tgt_query_corres;
+  tgt_query_corres.reserve(target_points.size() * knn);
+
+  for (int i = 0; i < target_points.size(); i++) {
+    searchKDTree(&feature_tree_src, tgt_features[i], corres_K, dis, knn);
+    for (int j = 0; j < knn; j++) {
+      tgt_query_corres.emplace_back(corres_K[j], i);
+    }
+  }
+
+  // Find the mutual correspondences
+  std::unordered_set<std::pair<int, int>, boost::hash<std::pair<int, int>>> src_set(src_query_corres.begin(), src_query_corres.end());
+  std::vector<std::pair<int, int>> corres;
+  corres.reserve(src_query_corres.size());
+
+  for (const auto& pair : tgt_query_corres) {
+    if (src_set.find(pair) != src_set.end()) {
+      corres.emplace_back(pair);
+    }
+  }
+
+  return corres;
+}
 
 std::vector<std::pair<int, int>> Matcher::calculateCorrespondences(
     const teaser::PointCloud& source_points, const teaser::PointCloud& target_points,
